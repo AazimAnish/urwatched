@@ -57,6 +57,7 @@ export const story: Scene[] = [
   { lines: ['“Reject all.” Nice try.', 'I set no cookies, and I still get these details.', 'Sit down.', 'This is going to be quick for me.'], how: privacy },
 
   // 2. Place and weather
+  { reads: ['connection'], render: facts => facts.connection?.ip ? [segments('Your connection arrived from ', datum(facts.connection.ip), '.'), ...say('That’s the public IP this site received.', 'You brought it with you.')] : [], how: 'The same-origin /api/connection Vercel Function reads Vercel’s x-real-ip request header and validates it as IPv4 or IPv6. This is the connection address seen by the host, which may belong to a VPN, proxy or shared network. It is not a device identity, private LAN address or proof of where you live. No permission, third-party IP lookup or WebRTC probe is needed. Responses are private and no-store; the app does not persist this address. Missing IP readings are omitted, including in local previews.', pending: 'Give me a second.' },
   { reads: ['connection', 'clock'], render: weather, how: weatherHow, pending: 'Give me a second.' },
   { render: facts => {
     const location = facts.connection?.location;
