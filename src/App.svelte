@@ -499,6 +499,7 @@
       {#if panelOpen}
         <p class="terminal-output"><RenderedText parts={panelParts} /></p>
         {#if plainText(panelParts).includes('Open-Meteo')}<p><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather data by Open-Meteo</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a></p>{/if}
+        {#if plainText(panelParts).includes('IPWhois')}<p><a href="https://ipwhois.io/documentation" target="_blank" rel="noreferrer">IPWhois lookup documentation</a></p>{/if}
       {:else if phase === 'review' || (skipPlayback && active)}
         {#each reviewEntries as entry (entry.sceneId)}
           <div class="review-entry">

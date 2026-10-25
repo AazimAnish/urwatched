@@ -10,7 +10,7 @@ export function profile(facts: Readonly<Partial<Facts>>, context: StoryContext, 
   const snapshot = {
     purpose: 'Local educational example. Not an auction or advertiser profile. Never uploaded.',
     observed: {
-      connection: facts.connection ? { ip: facts.connection.ip, environment: facts.connection.environment } : null,
+      connection: facts.connection ? { ip: facts.connection.ip, environment: facts.connection.environment, requestUserAgent: facts.connection.userAgent } : null,
       browserReported: facts.reported ?? null,
       graphics: facts.gpu ?? null,
       battery: facts.battery ?? null,
@@ -22,9 +22,9 @@ export function profile(facts: Readonly<Partial<Facts>>, context: StoryContext, 
       localVisitCount: context.visits,
       locationPermissionOutcome: locationOutcome,
     },
-    estimates: { device: facts.device ?? null, approximateLocation: facts.connection?.location ?? null, weather: facts.connection?.weather ?? null, network: facts.network ?? null, possibleAdFilter: facts.adFilter ?? null },
+    estimates: { ipNetwork: facts.connection?.network ?? null, device: facts.device ?? null, approximateLocation: facts.connection?.location ?? null, weather: facts.connection?.weather ?? null, network: facts.network ?? null, possibleAdFilter: facts.adFilter ?? null },
     unavailable: { privateWindow: 'unknown', identity: 'unknown', interests: 'unknown', income: 'unknown', preciseCoordinates: 'not retained' },
-    note: 'Browser reports can be reduced or altered. Null means no reading. Advertising systems may use similar fields; this is not an OpenRTB bid request.',
+    note: 'Browser reports can be reduced or altered. Null means no reading. The server sends the public connection IP to ipwho.is for ISP/ASN; that provider receives it. Advertising systems may use similar fields; this is not an OpenRTB bid request.',
   };
   // Tokenize JSON rather than injecting HTML; only values receive the data color.
   return (JSON.stringify(snapshot, null, 2).match(/"(?:\\.|[^"\\])*"|\b(?:true|false|null|\d+(?:\.\d+)?)\b|[^"\w]+|\w+/g) ?? []).map((text, index, tokens) => ({

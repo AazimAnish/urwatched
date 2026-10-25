@@ -183,6 +183,18 @@ export async function collectConnection(signal: AbortSignal): Promise<Connection
     const location = value.location as Record<string, unknown>;
     const nullable = (input: unknown) => input === null || (typeof input === 'string' && input.length <= 200 && !/[\u0000-\u001f\u007f]/.test(input));
     if (!nullable(value.ip) || !['city', 'region', 'country', 'postalCode', 'timezone'].every(key => nullable(location[key]))) throw new Error('Invalid connection readings');
+    const safeText = (input: unknown, limit = 200): string | null => typeof input === 'string' && input.length <= limit && !/[\u0000-\u001f\u007f]/.test(input) ? input : null;
+    const coordinate = (input: unknown, limit: number): number | null => typeof input === 'number' && Number.isFinite(input) && Math.abs(input) <= limit ? input : null;
+    let network: ConnectionData['network'] = null;
+    if (value.network && typeof value.network === 'object') {
+      const n = value.network as Record<string, unknown>;
+      if (n.source === 'ipwho.is') {
+        const asn = typeof n.asn === 'number' && Number.isSafeInteger(n.asn) && n.asn > 0 && n.asn <= 4294967295 ? n.asn : null;
+        const isp = safeText(n.isp);
+        const organization = safeText(n.organization);
+        if (asn !== null || isp || organization) network = { asn, isp, organization, source: 'ipwho.is' };
+      }
+    }
     let weather: ConnectionData['weather'] = null;
     if (value.weather && typeof value.weather === 'object') {
       const w = value.weather as Record<string, unknown>;
@@ -190,10 +202,14 @@ export async function collectConnection(signal: AbortSignal): Promise<Connection
     }
     return {
       weather,
+      network,
+      userAgent: safeText(value.userAgent, 1024),
       environment: value.environment,
       ip: value.ip as string | null,
       location: {
         city: location.city as string | null, region: location.region as string | null,
+        regionName: safeText(location.regionName),
+        latitude: coordinate(location.latitude, 90), longitude: coordinate(location.longitude, 180),
         timezone: location.timezone as string | null, country: location.country as string | null, postalCode: location.postalCode as string | null,
       },
     };

@@ -11,12 +11,18 @@ export interface Scene {
   special?: 'profile' | 'memory' | 'snapshot' | 'receipt';
 }
 const say = (...lines: string[]): Sentences => lines.map(line => segments(line));
-const privacy = 'No cookies or analytics. One visit count and first/latest dates are saved automatically in localStorage. Forget me and the red pill delete this record and stop the session. Other readings stay in page memory. The host receives ordinary requests and may retain security logs. The narrator’s taunts do not establish identity, feelings or an external watcher.';
-const connection = 'Vercel estimates location from the connection IP. VPNs, proxies and mobile networks can move it. The result is not proof of residence. Region values may be administrative codes. Local previews have no connection location; no ISP lookup runs.';
+const privacy = 'No cookies or analytics. One visit count and first/latest dates are saved automatically in localStorage. Forget me and the red pill delete this record and stop the session. Browser readings stay in page memory. The server sends the public connection IP to IPWhois (ipwho.is) for ISP/ASN and a matching region name. That provider receives the IP. The host receives ordinary requests and may retain security logs. The narrator’s taunts do not establish identity, feelings or an external watcher.';
+const connection = 'Vercel estimates location from the connection IP. VPNs, proxies and mobile networks can move it. The result is not proof of residence. Region values may be administrative codes; an IPWhois region name is used only when its country and region codes match Vercel. Latitude/longitude and postal code are approximate IP-database results, not GPS or a street address. Local previews have no connection location or ISP lookup.';
 const weatherHow = `${connection} A same-origin request retrieves Open-Meteo weather with IP coordinates rounded to 0.1 degrees. The provider receives the server request and coarse coordinates, not the visitor IP or permission-granted coordinates. Modelled conditions can differ from weather at your window. Rain-specific WMO codes select the umbrella line; heat means above 33°C and clear means code 0. No indoor activity or umbrella use is observed. Weather data: Open-Meteo, CC BY 4.0.`;
 const machine = 'Device and GPU labels are browser reports and may be altered. Memory is a coarse estimate. These readings do not establish ownership, purchase price or a specific laptop. Missing battery readings prove nothing. Screen count and another screen’s contents are not available; isExtended only reports more than one screen.';
 const arrival = 'Only the supplied referrer hostname is used. Missing referrers do not establish a typed URL or private message. A referrer does not reveal the time spent on that site. The Navigation Timing API can identify a reload.';
 const closing = ['Privacy isn’t only taken from you.', 'You hand it over one click at a time.', 'Hand it over slower.'];
+
+function countryName(code: string | null): string | null {
+  if (!code) return null;
+  try { return new Intl.DisplayNames(['en'], { type: 'region' }).of(code) || code; }
+  catch { return code; }
+}
 
 function weather(facts: Readonly<Partial<Facts>>): Sentences {
   const current = facts.connection?.weather;
@@ -57,13 +63,32 @@ export const story: Scene[] = [
   { lines: ['“Reject all.” Nice try.', 'I set no cookies, and I still get these details.', 'Sit down.', 'This is going to be quick for me.'], how: privacy },
 
   // 2. Place and weather
-  { reads: ['connection'], render: facts => facts.connection?.ip ? [segments('Your connection arrived from ', datum(facts.connection.ip), '.'), ...say('That’s the public IP this site received.', 'You brought it with you.')] : [], how: 'The same-origin /api/connection Vercel Function reads Vercel’s x-real-ip request header and validates it as IPv4 or IPv6. This is the connection address seen by the host, which may belong to a VPN, proxy or shared network. It is not a device identity, private LAN address or proof of where you live. No permission, third-party IP lookup or WebRTC probe is needed. Responses are private and no-store; the app does not persist this address. Missing IP readings are omitted, including in local previews.', pending: 'Give me a second.' },
+  { reads: ['connection'], render: facts => facts.connection?.ip ? [segments('Your connection arrived from ', datum(facts.connection.ip), '.'), ...say('That’s the public IP this site received.', 'You brought it with you.')] : [], how: 'The same-origin /api/connection Vercel Function reads Vercel’s x-real-ip request header and validates it as IPv4 or IPv6. This is the connection address seen by the host, which may belong to a VPN, proxy or shared network. It is not a device identity, private LAN address or proof of where you live. The IP itself needs no permission or WebRTC probe. The same request also sends this public IP from the server to IPWhois (ipwho.is) for ISP/ASN. The lookup provider receives the IP, but no typing, wallet or permission-granted location data. Responses are private and no-store; the app does not persist this address. Missing IP readings are omitted, including in local previews.', pending: 'Give me a second.' },
   { reads: ['connection', 'clock'], render: weather, how: weatherHow, pending: 'Give me a second.' },
   { render: facts => {
     const location = facts.connection?.location;
-    if (location?.city) return [segments('Your connection points near ', datum([location.city, location.region].filter(Boolean).join(', ')), '.'), ...say('Still think I’m bluffing?')];
+    const place = location ? [location.city, location.regionName || location.region, countryName(location.country)].filter(Boolean).join(', ') : '';
+    if (place) return [segments('Your connection points near ', datum(place), '.'), ...say('Still think I’m bluffing?')];
     return facts.clock ? [segments('No location result. Your clock still says ', datum(facts.clock.timezone), '.'), ...say('I’ll wait.')] : [];
   }, how: connection },
+  { render: facts => {
+    const location = facts.connection?.location;
+    if (!location) return [];
+    const lines: Sentences = [];
+    if (location.postalCode) lines.push(segments('The IP lookup puts you around postal code ', datum(location.postalCode), '.'));
+    if (location.latitude !== null && location.longitude !== null) lines.push(segments('Its map estimate is around ', datum(location.latitude.toFixed(2)), ', ', datum(location.longitude.toFixed(2)), '.'), ...say('An area. Not your front door.'));
+    if (location.timezone) lines.push(segments('That address is mapped to ', datum(location.timezone), '.'));
+    return lines;
+  }, how: `${connection} Coordinate text is rounded to two decimals for display; that does not imply kilometre-level accuracy. IP-inferred timezone is separate from the browser’s clock setting.` },
+  { render: facts => {
+    const network = facts.connection?.network;
+    if (!network) return [];
+    const lines: Sentences = [];
+    if (network.isp) lines.push(segments('Your IP is listed under ', datum(network.isp), '.'), ...say('You didn’t have to introduce your provider.'));
+    else if (network.organization) lines.push(segments('Your IP’s network is registered to ', datum(network.organization), '.'));
+    if (network.asn !== null) lines.push(segments('The network’s number is ', datum(`AS${network.asn}`), '.'));
+    return lines;
+  }, how: 'The Vercel Function sends only its validated connection IP to IPWhois (https://ipwhois.io/documentation), over HTTPS at ipwho.is. ISP and ASN are database mappings, not proof of a personal subscription; VPNs, hosts and upstream operators may appear. ASN identifies a routing network, not a person. The lookup has a 2.5-second deadline; errors, invalid results and quota limits leave these fields unavailable. The provider receives the IP and may keep records under its own policies. This app does not cache or persist the IP/network lookup.' },
   { render: facts => {
     const zone = facts.connection?.location.timezone;
     const clock = facts.clock;
@@ -81,6 +106,10 @@ export const story: Scene[] = [
   { reads: ['referrer'], render: facts => facts.referrer ? [segments('Your referring link came from ', datum(facts.referrer), '.'), ...say('You brought that detail with you.')] : say('No referring link was reported.', 'Typed this in?', 'Or someone sent it privately?'), how: arrival },
 
   // 4. The machine
+  { reads: ['reported'], render: facts => {
+    const agent = facts.connection?.userAgent || facts.reported?.userAgent;
+    return agent ? [segments('Your browser introduced itself as ', datum(agent), '.'), ...say('Quite an introduction.')] : [];
+  }, how: 'The request User-Agent is read from the request header by the Vercel Function, with navigator.userAgent as a browser-side fallback. It can be reduced, altered or spoofed and does not guarantee exact browser or OS versions. No User-Agent is forwarded to the ISP or weather provider.' },
   { reads: ['device', 'gpu', 'reported'], render: facts => {
     const lines: Sentences = [];
     if (facts.device && facts.device.kind !== 'unknown') lines.push(segments('Looks like ', datum(facts.device.label), '.'));
@@ -157,8 +186,8 @@ export const story: Scene[] = [
     const paragraph: TextPart[] = segments('Here’s what you gave me: ');
     details.forEach((detail, index) => paragraph.push(...(index ? segments(', ') : []), ...detail));
     paragraph.push(...segments('.'));
-    return [...(details.length ? [paragraph] : []), ...say('Add a few guesses and it’s a profile.', 'Even when a guess is wrong, a buyer might use it anyway.', 'These readings stay in this page.', 'Other sites may send theirs on.')];
-  }, how: 'This paragraph combines observed reports with qualified estimates. It does not establish residence, device ownership, wake time, spoken language, habitual visit intervals or wealth. The expandable JSON is a local educational example, not an auction or broker profile. No readings are uploaded. Ordinary page requests and the coarse weather lookup still occur. Standard OpenRTB device fields include IP, user-agent, screen and language, but this JSON is not a complete OpenRTB request.' },
+    return [...(details.length ? [paragraph] : []), ...say('Add a few guesses and it’s a profile.', 'Even when a guess is wrong, a buyer might use it anyway.', 'This profile stays in this page.', 'Other sites may send theirs on.')];
+  }, how: 'This paragraph combines observed reports with qualified estimates. It does not establish residence, device ownership, wake time, spoken language, habitual visit intervals or wealth. The expandable JSON is a local educational example, not an auction or broker profile. The profile and browser behavior are not uploaded. The server sends the connection IP to IPWhois for ISP/ASN; ordinary page requests and the coarse weather lookup still occur. Standard OpenRTB device fields include IP, user-agent, screen and language, but this JSON is not a complete OpenRTB request.' },
 
   // 12. Private window
   { lines: ['Private window?', 'It clears session data after you close it.', 'During the visit, many of these details are still visible.', 'Private doesn’t mean a hidden person.'], how: 'Private-window status is unknown. Private modes isolate sessions, clear session data and may add tracking protections; downloads and bookmarks may remain. They do not guarantee an identical fingerprint or hide the connection IP. No private-mode detection runs.' },
