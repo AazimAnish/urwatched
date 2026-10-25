@@ -7,7 +7,7 @@ export interface Scene {
   render?: (facts: Readonly<Partial<Facts>>, context: StoryContext) => Sentences;
   how: string;
   pending?: string;
-  interaction?: 'location' | 'typing' | 'choice' | 'receipt';
+  interaction?: 'typing' | 'choice' | 'receipt';
   special?: 'profile' | 'memory' | 'snapshot' | 'receipt';
 }
 const say = (...lines: string[]): Sentences => lines.map(line => segments(line));
@@ -178,17 +178,11 @@ export const story: Scene[] = [
     return lines;
   }, how: 'Measurements describe this page only. Hover measures pointer entry to pointer press on controls, excluding touch/keyboard and intervals over one minute; at most 100 samples are aggregated. The fast or ordinary remark uses a 250 ms threshold, and the number is not displayed. Duration does not establish hesitation or decision style. Pointer events do not reliably distinguish mouse and trackpad. Hidden-page events interrupt on return and do not reveal the destination or reason.' },
 
-  // 8. Camera and microphone: dialogue only, capture stays disabled.
-  { lines: ['You looked for the camera light.', 'It stayed dark.', 'I did not touch your camera or your microphone.', 'I had no need to.', 'Your searches, your clicks and your location are sufficient.', 'That is how an advertisement can follow a conversation.', 'Muting hides your voice. It does not hide your habits.'], how: 'Camera and microphone are disabled by this site’s Permissions-Policy. No stream, preview, recording or permission request is made. The narrator cannot see camera indicators, faces or another app’s mute state. Advertising examples describe possible mechanisms; this page cannot determine why any particular ad appeared.' },
-
-  // 9. Location
-  { lines: ['I can be more precise.', 'Your browser needs your permission.'], interaction: 'location', how: 'This passage automatically calls geolocation once after the explanation; browser authorization is required. No separate Allow button is used. Accuracy is an estimate, not a guarantee or street address. A denied request is not bypassed. The browser may use an external location provider. Coordinates are transient; the review retains only the outcome. A 15-second deadline prevents a stalled story, and late callbacks are ignored.' },
-
-  // 10. Typing
+  // 8. Typing
   { lines: ['Type this: I am being watched.', 'I am not interested in the words.', 'I am interested in how you type them.'], interaction: 'typing', how: 'Only this exercise is measured. Enter or Read my typing submits after 12 characters; Skip this discards the attempt. Speed uses five-character words from first to last edit, excluding paused/hidden time and the submit delay. Assisted input suppresses timing. A pre-watched gap requires an ordinary completed exact-prefix keyboard attempt. Neither timing nor corrections identify a mental state.' },
   { render: (_, context) => typingSentences(context.tasks.typing), how: 'Results come only from this attempt. No speed or pause is invented for missing or assisted input. Timing describes the measured keys, not a thought, personality or stable identity.' },
 
-  // 11. The narrowing
+  // 9. The narrowing
   { special: 'profile', reads: ['campaign', 'redirects'], render: (facts, context) => {
     const steps: TextPart[][] = [];
     if (facts.clock) steps.push(segments('Your clock leaves one region: ', datum(facts.clock.timezone), '.'));
@@ -201,13 +195,13 @@ export const story: Scene[] = [
     return [...lines, ...say('I did not ask your name.', 'Ergo, I did not need it.', 'A few guesses complete the profile.', 'A wrong guess is still sold.', 'This profile stays on this page.', 'Elsewhere, it is sent on.')];
   }, how: 'The narrowing illustrates how separate readings combine; no population counts or rarity numbers are computed. The paragraph combines observed reports with qualified estimates. It does not establish residence, device ownership, wake time, spoken language, habitual visit intervals or wealth. The expandable JSON is a local educational example, not an auction or broker profile. The profile and browser behavior are not uploaded. The server sends the connection IP to IPWhois for ISP/ASN; ordinary page requests and the coarse weather lookup still occur. Standard OpenRTB device fields include IP, user-agent, screen and language, but this JSON is not a complete OpenRTB request.' },
 
-  // 12. Private window
+  // 10. Private window
   { lines: ['You wonder about private windows.', 'A private window erases your record when you close it.', 'It does not erase you while you are here.'], how: 'Private-window status is unknown. Private modes isolate sessions, clear session data and may add tracking protections; downloads and bookmarks may remain. They do not guarantee an identical fingerprint or hide the connection IP. During a visit many of the readings above remain visible. No private-mode detection runs.' },
 
-  // 13. Code
+  // 11. Code
   { special: 'snapshot', how: 'A local SHA-256 snapshot combines completed platform, graphics, timezone, language and typing reports. Only its first six hexadecimal characters are shown. It excludes IP, weather, coordinates, history and entered text. It is not a stable identity, unique match or rarity estimate. It is never saved or uploaded.' },
 
-  // 14. Exit
+  // 12. Exit
   { lines: ['I can delete this page’s record.', 'Do so, if you wish.', 'Your machine will not forget.', 'The next site will read the same details.', 'The problem is choice.'], interaction: 'choice', how: `${privacy} Forget me and the red pill remove the record and clear this session. Blue keeps the record and opens the review. Clearing this record prevents this site from using it for a later return greeting; no recovery is attempted. The farm, tower, drone and database lines are hypothetical examples, not findings about this visitor.` },
   { special: 'receipt', render: (_, context) => blueEnding(context.visits !== null), interaction: 'receipt', how: privacy },
 ];

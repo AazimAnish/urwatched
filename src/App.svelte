@@ -73,12 +73,6 @@
   const legacyKey = 'invisible-system:marker:v1';
   let profileParts = $state<TextPart[]>([]);
   const interactions: Interactions = { pointer: null, hoverSamples: 0, hoverTotalMs: 0 };
-  let locationResolved = false;
-  let locationParts = $state<TextPart[]>([]);
-  let locationPending = $state(false);
-  let locationStatus = 'Coordinates weren’t requested.';
-  let locationAttempt = 0;
-  let locationTimer: ReturnType<typeof setTimeout> | undefined;
 
   function context(): StoryContext {
     return { visits: savedVisits, previousVisit, startedAt, behavior: { ...behavior, meanHoverMs: interactions.hoverSamples ? Math.round(interactions.hoverTotalMs / interactions.hoverSamples) : null, pointer: interactions.pointer }, tasks, blueChosen };
@@ -102,7 +96,7 @@
   function completePage() {
     shown = characters(pages[page] ?? '').length;
     announced = pages[page] ?? '';
-    phase = 'reading'; readingLeft = 2000; work = 0;
+    phase = 'reading'; readingLeft = 3500; work = 0;
   }
   function startPage() {
     shown = 0; work = 0; previousFrame = 0;
@@ -116,7 +110,7 @@
     const elapsed = previousFrame ? Math.min(now - previousFrame, 100) : 0;
     previousFrame = now;
     if (phase === 'typing') {
-      work += elapsed / 100;
+      work += elapsed / 140;
       const count = Math.floor(work);
       if (count) { shown = Math.min(shown + count, characters(pages[page]).length); work -= count; }
       if (shown === characters(pages[page]).length) completePage();
@@ -132,13 +126,12 @@
     if (page < pages.length - 1) { page++; startPage(); }
     else if (sentenceIndex + 1 < sceneSentences.length) {
       sentenceIndex++; instantSentence = false;
-      bodyParts = sceneSentences[sentenceIndex];
-      pages = fit(plainText(bodyParts)); page = 0;
+      bodyParts = [...bodyParts, ...segments('\n'), ...sceneSentences[sentenceIndex]];
+      pages = fit(plainText(bodyParts)); page = pages.length - 1;
       startPage();
     }
     else if (scene?.interaction === 'receipt') prepareReview();
-    else if (scene?.interaction === 'location' && locationResolved) { clearLocation(); phase = 'waiting'; }
-    else if (scene?.interaction) { phase = 'interaction'; if (scene.interaction === 'location') locate(); }
+    else if (scene?.interaction) { phase = 'interaction'; }
     else phase = 'waiting';
   }
   function resolveScene(index: number): Promise<TranscriptEntry> {
@@ -152,7 +145,7 @@
     const item = story[index];
     const facts = await observations.read(item.reads ?? []);
     if (!active) return { sceneId: index, parts: [], sentences: [], how: [], status: 'unavailable' };
-    if (item.special === 'profile') profileParts = profile(facts, context(), interactions, locationStatus);
+    if (item.special === 'profile') profileParts = profile(facts, context(), interactions);
     const sentences = item.special === 'snapshot' ? await makeCode() : item.render ? item.render(facts, context()) : (item.lines ?? []).map(line => segments(line));
     return { sceneId: index, parts: joinSentences(sentences), sentences, how: segments(item.how), status: sentences.length ? 'ready' : 'unavailable' };
   }
@@ -177,7 +170,7 @@
         await tick();
         if (!active || token !== attempt) return;
         if (follow) area.scrollTop = area.scrollHeight;
-        if (scene.interaction === 'location') locate();
+
       } else phase = 'waiting';
       return;
     }
@@ -204,16 +197,14 @@
     attempt++; cancelAnimationFrame(frame); frame = 0; previousFrame = 0;
     paused = false;
     // Reuse the current reading; never resolve scenes beyond an unfinished task.
-    if (scene?.interaction === 'location' && locationResolved) {
-      clearLocation(); reviewEntries = buildReview();
-    } else if (phase !== 'waiting') sceneIndex = Math.max(-1, sceneIndex - 1);
+    if (phase !== 'waiting') sceneIndex = Math.max(-1, sceneIndex - 1);
     phase = 'waiting';
     stage.focus({ preventScroll: true });
   }
   function prepareReview() {
     if (!active || phase === 'preparing' || phase === 'review') return;
     attempt++; cancelAnimationFrame(frame); frame = 0; previousFrame = 0;
-    clearLocation(); paused = false; noticeCount = 0; returnFocus = undefined;
+    paused = false; noticeCount = 0; returnFocus = undefined;
     phase = 'preparing'; reviewIndex = 0; reviewLoading = false;
     announced = 'Preparing the complete review. Waiting for remaining readings.';
     stage.focus({ preventScroll: true });
@@ -234,7 +225,7 @@
       if (!entry || entry.status === 'unavailable') continue;
       const item = story[index];
       const content = [...(item.special === 'receipt' && blueChosen ? joinSentences(blueEnding(savedVisits !== null)) : entry.parts)];
-      if (item.interaction === 'location') content.push(...segments('\n', locationStatus));
+
       output.push({ ...entry, parts: content, how: [...entry.how, ...(item.special === 'memory' ? memoryParts() : [])] });
     }
     return output;
@@ -258,7 +249,7 @@
   }
   function continueStory() {
     if (phase !== 'interaction' || !active || panelOpen) return;
-    clearLocation(); phase = 'waiting'; stage.focus({ preventScroll: true });
+    phase = 'waiting'; stage.focus({ preventScroll: true });
   }
   async function openPanel(title: string, content: TextPart[]) {
     backFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
@@ -332,57 +323,11 @@
     if (phase === 'review') void showReview(true);
     else continueStory();
   }
-
-  function clearLocation() {
-    locationAttempt++; clearTimeout(locationTimer); locationPending = false; locationParts = [];
-  }
-  function locate() {
-    if (!active || locationPending) return;
-    clearLocation(); locationStatus = 'Location was requested; no coordinates are kept in this review.';
-    const token = locationAttempt;
-    locationPending = true;
-    locationParts = segments('Waiting for the browser’s answer.');
-    const done = async (message: string | TextPart[]) => {
-      if (!active || token !== locationAttempt) return;
-      locationAttempt++; clearTimeout(locationTimer);
-      locationPending = false;
-      locationResolved = true;
-      locationParts = typeof message === 'string' ? segments(message) : message;
-      sceneSentences = !skipPlayback && typeof message === 'string' ? message.split('\n').map(line => segments(line)) : [locationParts];
-      sentenceIndex = 0; bodyParts = sceneSentences[0];
-      phase = 'loading';
-      const resultToken = locationAttempt;
-      await tick();
-      if (!active || resultToken !== locationAttempt) return;
-      if (skipPlayback) {
-        // The whole result is already visible: one reading pause, no hidden typing.
-        pages = [plainText(locationParts)]; page = 0; previousFrame = 0;
-        completePage(); schedule(); reviewEntries = buildReview();
-        return;
-      }
-      pages = fit(plainText(bodyParts)); page = 0; startPage();
-    };
-    if (!navigator.geolocation || !window.isSecureContext) { locationStatus = 'Location unavailable in this browser context.'; done('No location result here.'); return; }
-    locationTimer = setTimeout(() => { locationStatus = 'Location request timed out.'; done('No location arrived in time.'); }, 15000);
-    try {
-      navigator.geolocation.getCurrentPosition(position => {
-        if (!active || token !== locationAttempt) return;
-        const { latitude, longitude, accuracy } = position.coords;
-        if (![latitude, longitude, accuracy].every(Number.isFinite) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180 || accuracy < 0) { locationStatus = 'Invalid location report.'; done('The location report was unusable.'); return; }
-        done(segments(datum(latitude.toFixed(5)), ', ', datum(longitude.toFixed(5)), '. Reported accuracy: ', datum(Math.ceil(accuracy)), ' metres.'));
-        locationStatus = 'Coordinates were supplied, then cleared from this page.';
-      }, error => {
-        if (!active || token !== locationAttempt) return;
-        locationStatus = error.code === 1 ? 'The location request was refused or restricted.' : 'The location request returned no usable coordinates.';
-        done(error.code === 1 ? 'Denied.\nThat button stops this request.\nIt doesn’t take back the details you already shared.' : error.code === 3 ? 'No location arrived in time.' : 'No location reading this time.');
-      }, { enableHighAccuracy: false, maximumAge: 0, timeout: 12000 });
-    } catch { locationStatus = 'Location request failed.'; done('Location could not be requested.'); }
-  }
   function stop() {
     active = false; attempt++; session.abort();
     behavior.advances = behavior.hidden = 0; blueChosen = false;
     cancelAnimationFrame(frame); cancelAnimationFrame(layoutFrame); frame = 0;
-    clearLocation(); locationStatus = 'Coordinates cleared.'; observations.clear(); tasks = {};
+    observations.clear(); tasks = {};
     profileParts = []; interactions.pointer = null; interactions.hoverSamples = interactions.hoverTotalMs = 0;
     transcript.clear(); resolvedScenes.clear(); reviewEntries = [];
     bodyParts = []; sceneSentences = []; pages = ['']; announced = ''; panelTitle = ''; panelParts = [];
@@ -479,10 +424,7 @@
 <svelte:window onpagehide={stop} />
 
 {#snippet taskContent()}
-      {#if interaction === 'location'}
-        <p>Your browser controls this request.</p>
-        <p class="result" role="status"><RenderedText parts={locationParts} /></p>
-      {:else if interaction === 'typing'}
+      {#if interaction === 'typing'}
         <TypingTask suspended={frozen} onskip={continueStory} onresult={result => { tasks.typing = result; if (result) continueStory(); }} />
       {:else if interaction === 'choice'}
         <ChoiceTask suspended={frozen} onchoose={choose} onforget={() => void forget(false)} />
@@ -510,8 +452,6 @@
         {/each}
         {#if phase === 'review'}
           {#if !blueChosen}<ChoiceTask onchoose={choose} onforget={() => void forget(false)} />{/if}
-        {:else if !interaction && locationParts.length}
-          <p class="result" role="status"><RenderedText parts={locationParts} /></p>
         {:else if phase === 'loading'}
           <p role="status">Give me a second.</p>
         {/if}
@@ -543,7 +483,7 @@
     {:else if active}
       <button aria-pressed={paused} onclick={() => { paused = !paused; }}>{paused ? 'Resume' : 'Pause'}</button>
       {#if phase === 'preparing'}<button onclick={endSession}>Clear session</button>{:else}{#if !skipPlayback && !interaction}<button aria-label="Skip typing and reveal text up to the next interaction" onclick={skipToInteraction}>Skip</button>{/if}<button onclick={explain}>how?</button>{#if scene?.special === 'profile'}<button onclick={() => void openPanel('local profile · JSON', profileParts)}>See the profile</button>{/if}{/if}
-      {#if interaction === 'location'}<button onclick={continueStory}>Skip this request</button>{/if}
+
     {:else}
       <button onclick={() => location.reload()}>Begin again</button>
     {/if}

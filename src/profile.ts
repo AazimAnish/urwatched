@@ -6,7 +6,7 @@ export interface Interactions {
   hoverTotalMs: number;
 }
 
-export function profile(facts: Readonly<Partial<Facts>>, context: StoryContext, interactions: Interactions, locationOutcome: string): TextPart[] {
+export function profile(facts: Readonly<Partial<Facts>>, context: StoryContext, interactions: Interactions): TextPart[] {
   const snapshot = {
     purpose: 'Local educational example. Not an auction or advertiser profile. Never uploaded.',
     observed: {
@@ -20,7 +20,6 @@ export function profile(facts: Readonly<Partial<Facts>>, context: StoryContext, 
       announcedWalletNames: facts.wallets ?? [],
       interactions: { pointerFamily: interactions.pointer, hoverSamples: interactions.hoverSamples, meanHoverBeforePressMs: interactions.hoverSamples ? Math.round(interactions.hoverTotalMs / interactions.hoverSamples) : null, keyboardAdvances: context.behavior.advances, timesPageHidden: context.behavior.hidden, typing: context.tasks.typing ?? null },
       localVisitCount: context.visits,
-      locationPermissionOutcome: locationOutcome,
     },
     estimates: { ipNetwork: facts.connection?.network ?? null, device: facts.device ?? null, approximateLocation: facts.connection?.location ?? null, weather: facts.connection?.weather ?? null, network: facts.network ?? null, possibleAdFilter: facts.adFilter ?? null },
     unavailable: { privateWindow: 'unknown', identity: 'unknown', interests: 'unknown', income: 'unknown', preciseCoordinates: 'not retained' },
