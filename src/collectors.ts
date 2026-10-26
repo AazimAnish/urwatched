@@ -169,7 +169,7 @@ export async function collectConnection(signal: AbortSignal): Promise<Connection
   const abort = () => controller.abort();
   if (signal.aborted) controller.abort();
   signal.addEventListener('abort', abort, { once: true });
-  const timeout = setTimeout(abort, 6000);
+  const timeout = setTimeout(abort, 10000);
   try {
     const response = await fetch('/api/connection', { signal: controller.signal, credentials: 'omit', cache: 'no-store' });
     if (!response.ok) throw new Error('Connection unavailable');
@@ -207,6 +207,7 @@ export async function collectConnection(signal: AbortSignal): Promise<Connection
       environment: value.environment,
       ip: value.ip as string | null,
       location: {
+        source: location.source === 'vercel' || location.source === 'ipwho.is' ? location.source : null,
         city: location.city as string | null, region: location.region as string | null,
         regionName: safeText(location.regionName),
         latitude: coordinate(location.latitude, 90), longitude: coordinate(location.longitude, 180),

@@ -8,7 +8,7 @@ export interface ConnectionData {
   userAgent: string | null;
   network: { isp: string | null; asn: number | null; organization: string | null; source: 'ipwho.is' } | null;
   weather: Weather | null;
-  location: { city: string | null; region: string | null; regionName: string | null; country: string | null; postalCode: string | null; timezone: string | null; latitude: number | null; longitude: number | null };
+  location: { source: 'vercel' | 'ipwho.is' | null; city: string | null; region: string | null; regionName: string | null; country: string | null; postalCode: string | null; timezone: string | null; latitude: number | null; longitude: number | null };
 }
 
 function boundedHeader(value: string | null, maxLength = 200): string | null {
@@ -30,7 +30,9 @@ function coordinate(headers: Headers, name: string, limit: number): number | nul
 }
 
 function readConnection(headers: Headers, hosted: boolean): ConnectionData {
-  const ip = hosted ? boundedHeader(headers.get('x-real-ip'), 64) : null;
+  const ip = hosted ? ['x-real-ip', 'x-vercel-forwarded-for', 'x-forwarded-for']
+    .map(name => boundedHeader(headers.get(name), 128)?.split(',')[0].trim())
+    .find(value => value && isIP(value)) : null;
   const country = hosted ? boundedHeader(headers.get('x-vercel-ip-country'), 16) : null;
   return {
     environment: hosted ? 'vercel' : 'local',
@@ -39,6 +41,7 @@ function readConnection(headers: Headers, hosted: boolean): ConnectionData {
     userAgent: boundedHeader(headers.get('user-agent'), 1024),
     ip: ip && isIP(ip) ? ip : null,
     location: {
+      source: hosted ? 'vercel' : null,
       city: hosted ? decodedCity(headers.get('x-vercel-ip-city')) : null,
       regionName: null,
       latitude: hosted ? coordinate(headers, 'x-vercel-ip-latitude', 90) : null,
@@ -53,9 +56,9 @@ function readConnection(headers: Headers, hosted: boolean): ConnectionData {
 
 const weatherCache = new Map<string, { expires: number; weather: Weather }>();
 
-async function readWeather(headers: Headers): Promise<Weather | null> {
-  const lat = coordinate(headers, 'x-vercel-ip-latitude', 90);
-  const lon = coordinate(headers, 'x-vercel-ip-longitude', 180);
+async function readWeather(location: ConnectionData['location']): Promise<Weather | null> {
+  const lat = location.latitude;
+  const lon = location.longitude;
   const latitude = lat === null ? null : Math.round(lat * 10) / 10;
   const longitude = lon === null ? null : Math.round(lon * 10) / 10;
   if (latitude === null || longitude === null) return null;
@@ -85,7 +88,7 @@ async function readNetwork(data: ConnectionData): Promise<void> {
   if (!data.ip || Date.now() < networkRetryAt) return;
   try {
     const url = new URL(`https://ipwho.is/${encodeURIComponent(data.ip)}`);
-    url.searchParams.set('fields', 'ip,success,country_code,region,region_code,connection.asn,connection.isp,connection.org');
+    url.searchParams.set('fields', 'ip,success,city,country_code,region,region_code,postal,latitude,longitude,timezone.id,connection.asn,connection.isp,connection.org');
     const response = await fetch(url, { signal: AbortSignal.timeout(2500), redirect: 'error', headers: { Accept: 'application/json' } });
     if (response.status === 429) {
       const retry = Number(response.headers.get('retry-after'));
@@ -107,8 +110,20 @@ async function readNetwork(data: ConnectionData): Promise<void> {
       const organization = text(network.org);
       if (asn !== null || isp || organization) data.network = { asn, isp, organization, source: 'ipwho.is' };
     }
-    // Use the region name only when both providers agree on the country and region code.
-    if (data.location.country && data.location.region && result.country_code === data.location.country && typeof result.region_code === 'string' && result.region_code === data.location.region) data.location.regionName = text(result.region);
+    const city = text(result.city);
+    const country = typeof result.country_code === 'string' && /^[A-Z]{2}$/.test(result.country_code) ? result.country_code : null;
+    // Keep a single location estimate together rather than mixing conflicting databases.
+    if (!data.location.city && (city || (!data.location.country && country))) {
+      const number = (value: unknown, limit: number) => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= limit ? value : null;
+      data.location = {
+        source: 'ipwho.is', city, country,
+        region: text(result.region_code), regionName: text(result.region),
+        postalCode: text(result.postal), timezone: text(result.timezone?.id),
+        latitude: number(result.latitude, 90), longitude: number(result.longitude, 180),
+      };
+    } else if (data.location.country && data.location.region && country === data.location.country && result.region_code === data.location.region) {
+      data.location.regionName = text(result.region);
+    }
   } catch { /* Lookup failures never hide Vercel connection readings. */ }
 }
 
@@ -122,6 +137,13 @@ export async function connectionResponse(request: Request, hosted: boolean) {
   };
   if (request.method !== 'GET') return new Response('Method not allowed', { status: 405, headers: { ...headers, Allow: 'GET' } });
   const data = readConnection(request.headers, hosted);
-  if (hosted) await Promise.all([readWeather(request.headers).then(weather => { data.weather = weather; }), readNetwork(data)]);
+  if (hosted) {
+    const initialLocation = data.location;
+    await Promise.all([
+      (initialLocation.city ? readWeather(initialLocation) : Promise.resolve(null)).then(weather => { data.weather = weather; }),
+      readNetwork(data),
+    ]);
+    if (data.location !== initialLocation) data.weather = await readWeather(data.location);
+  }
   return Response.json(data, { headers });
 }
