@@ -48,13 +48,11 @@
 header { flex: none; }
 main { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; padding-top: clamp(0rem, 8dvh, 5rem); }
 .text-area { flex: 1; min-height: 0; position: relative; }
-.terminal-output, .text-probe { white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; margin: 0; }
-.text-probe { position: absolute; top: 0; left: 0; right: 0; visibility: hidden; pointer-events: none; }
-.terminal-output { position: relative; }
+.terminal-output { position: relative; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; margin: 0; }
 .cursor { position: relative; display: inline-block; width: 0; height: 1em; vertical-align: -.15em; }
 .cursor::after { content: ''; position: absolute; inset-block: 0; left: .15em; width: .55em; background: currentColor; }
 .concealed { display: none; }
-.interaction { min-height: 0; }
+.inline-interaction, .loading-output { margin-top: 1.5rem; }
 .commands, footer { display: flex; flex: none; flex-wrap: wrap; align-items: baseline; column-gap: 1.5rem; row-gap: .25rem; }
 footer { margin-top: auto; }
 .scrollable { overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; padding-right: .5rem; padding-bottom: 1rem; }
@@ -82,7 +80,7 @@ footer { margin-top: auto; }
 @media print {
   html, body, #app { height: auto; overflow: visible; }
   .terminal-shell { height: auto; color: #000; background: #fff; }
-  footer, .text-probe, .cursor { display: none; }
+  footer, .cursor { display: none; }
 }
 
 .filter-probe { position: fixed; left: -10000px; top: 0; pointer-events: none; }

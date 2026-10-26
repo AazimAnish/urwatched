@@ -7,7 +7,7 @@
   import { profile, type Interactions } from './profile.ts';
   import { createObservations } from './collectors.ts';
   import { story, blueEnding, redEnding } from './story.ts';
-  import { characters, paginate } from './typewriter.ts';
+  import { characters } from './typewriter.ts';
   import { segments, datum, plainText, sliceSegments, joinSentences } from './text.ts';
   import type { Sentences, StoryContext, TaskResults, TextPart, TranscriptEntry } from './types.ts';
 
@@ -34,8 +34,8 @@
   let returnFocus: HTMLElement | undefined;
   let returnScroll = 0;
   const text = $derived(plainText(bodyParts));
-  let pages = $state<string[]>(['']);
-  let page = $state(0);
+  const textLength = $derived(characters(text).length);
+  let following = true;
   let shown = $state(0);
   let announced = $state('');
   let tasks = $state<TaskResults>({});
@@ -45,7 +45,6 @@
   const frozen = $derived(paused || hidden || panelOpen || noticeCount > 0 || !active);
   const interaction = $derived(phase === 'interaction' ? scene?.interaction : undefined);
   let area: HTMLDivElement;
-  let probe: HTMLDivElement;
   let stage: HTMLElement;
   let backFocus: HTMLElement | undefined;
   let backScroll = 0;
@@ -58,8 +57,7 @@
   let layoutFrame = 0;
   let reviewIndex = $state(0);
   let reviewLoading = $state(false);
-  const pageStart = $derived(pages.slice(0, page).reduce((total, part) => total + characters(part).length, 0));
-  const visibleParts = $derived(sliceSegments(bodyParts, pageStart, shown));
+  const visibleParts = $derived(sliceSegments(bodyParts, 0, shown));
 
   let savedVisits = $state<number | null>(null);
   let firstSeen = $state<number | null>(null);
@@ -77,31 +75,30 @@
   function context(): StoryContext {
     return { visits: savedVisits, previousVisit, startedAt, behavior: { ...behavior, meanHoverMs: interactions.hoverSamples ? Math.round(interactions.hoverTotalMs / interactions.hoverSamples) : null, pointer: interactions.pointer }, tasks, blueChosen };
   }
-  function fit(value: string) { return paginate(value, probe, area.clientHeight - 12); }
-  function reflow() {
-    if (!mounted || !area?.clientWidth || !area.clientHeight) return;
-    if (skipPlayback) return;
-    if (noticeCount || panelOpen || ['loading', 'waiting', 'interaction', 'preparing', 'review', 'finished'].includes(phase)) return;
-    const position = pageStart + shown;
-    pages = fit(text);
-    let remaining = position;
-    page = 0;
-    while (page < pages.length - 1 && remaining >= characters(pages[page]).length) remaining -= characters(pages[page++]).length;
-    shown = Math.min(remaining, characters(pages[page]).length);
-    if (phase === 'reading' && shown < characters(pages[page]).length) phase = 'typing';
+  function followOutput() {
+    if (following && !panelOpen && !noticeCount && active) area.scrollTop = area.scrollHeight;
+  }
+  function trackScroll() {
+    if (!panelOpen && !noticeCount) following = area.scrollHeight - area.scrollTop - area.clientHeight < 48;
+  }
+  function appendSentence(parts: TextPart[], newScene = false) {
+    const separator = bodyParts.length ? segments(newScene ? '\n\n' : '\n') : [];
+    shown = characters(plainText(bodyParts)).length;
+    bodyParts = [...bodyParts, ...separator, ...parts];
+    startSentence();
   }
   function schedule() {
     if (!frame && !frozen && (phase === 'typing' || phase === 'reading')) frame = requestAnimationFrame(animate);
   }
-  function completePage() {
-    shown = characters(pages[page] ?? '').length;
-    announced = pages[page] ?? '';
+  function completeSentence() {
+    shown = textLength;
+    announced = plainText(sceneSentences[sentenceIndex] ?? []);
     phase = 'reading'; readingLeft = 3500; work = 0;
   }
-  function startPage() {
-    shown = 0; work = 0; previousFrame = 0;
+  function startSentence() {
+    work = 0; previousFrame = 0;
     phase = 'typing';
-    if (instantSentence || reduced) completePage();
+    if (instantSentence || reduced) completeSentence();
     schedule();
   }
   function animate(now: number) {
@@ -112,8 +109,8 @@
     if (phase === 'typing') {
       work += elapsed / 140;
       const count = Math.floor(work);
-      if (count) { shown = Math.min(shown + count, characters(pages[page]).length); work -= count; }
-      if (shown === characters(pages[page]).length) completePage();
+      if (count) { shown = Math.min(shown + count, textLength); work -= count; }
+      if (shown === textLength) completeSentence();
     } else if (phase === 'reading') {
       readingLeft -= elapsed;
       if (readingLeft <= 0) {
@@ -123,12 +120,9 @@
     schedule();
   }
   function advanceAfterReading() {
-    if (page < pages.length - 1) { page++; startPage(); }
-    else if (sentenceIndex + 1 < sceneSentences.length) {
+    if (sentenceIndex + 1 < sceneSentences.length) {
       sentenceIndex++; instantSentence = false;
-      bodyParts = [...bodyParts, ...segments('\n'), ...sceneSentences[sentenceIndex]];
-      pages = fit(plainText(bodyParts)); page = pages.length - 1;
-      startPage();
+      appendSentence(sceneSentences[sentenceIndex]);
     }
     else if (scene?.interaction === 'receipt') prepareReview();
     else if (scene?.interaction) { phase = 'interaction'; }
@@ -154,32 +148,18 @@
     const token = ++attempt;
     sceneIndex++; instantSentence = false;
     if (!scene) { prepareReview(); return; }
-    const follow = area.scrollHeight - area.scrollTop - area.clientHeight < 96;
-    phase = 'loading'; bodyParts = []; announced = '';
+    phase = 'loading'; announced = '';
     const entry = await resolveScene(sceneIndex);
     if (!active || token !== attempt) return;
     if (entry.status === 'unavailable') { phase = 'waiting'; return; }
     if (skipPlayback) {
       reviewEntries = buildReview();
       if (scene.interaction === 'receipt') { await showReview(true); return; }
-      await tick();
-      if (!active || token !== attempt) return;
-      if (follow) area.scrollTop = area.scrollHeight;
-      if (scene.interaction) {
-        phase = 'interaction';
-        await tick();
-        if (!active || token !== attempt) return;
-        if (follow) area.scrollTop = area.scrollHeight;
-
-      } else phase = 'waiting';
+      phase = scene.interaction ? 'interaction' : 'waiting';
       return;
     }
     sceneSentences = entry.sentences; sentenceIndex = 0;
-    bodyParts = sceneSentences[0];
-    await tick();
-    if (!active || token !== attempt) return;
-    pages = fit(text); page = 0;
-    startPage();
+    appendSentence(sceneSentences[0], true);
   }
   $effect(() => {
     if (!mounted) return;
@@ -187,9 +167,14 @@
     if (phase === 'waiting') void loadNext();
     else if (phase === 'preparing' && !reviewLoading) void collectReview();
     else {
-      if (phase === 'typing' && (instantSentence || reduced)) completePage();
+      if (phase === 'typing' && (instantSentence || reduced)) completeSentence();
       schedule();
     }
+  });
+  $effect(() => {
+    shown; phase; reviewEntries.length;
+    if (!mounted) return;
+    untrack(() => { void tick().then(followOutput); });
   });
   function skipToInteraction() {
     if (!active || phase === 'interaction' || phase === 'preparing') return;
@@ -216,7 +201,7 @@
       await resolveScene(reviewIndex);
       if (!active || token !== attempt) return;
       reviewIndex++; reviewLoading = false;
-    } else await showReview();
+    } else await showReview(true);
   }
   function buildReview(): TranscriptEntry[] {
     const output: TranscriptEntry[] = [];
@@ -233,7 +218,7 @@
   async function showReview(preservePosition = false) {
     const previous = preservePosition ? area.scrollTop : 0;
     reviewEntries = buildReview(); phase = 'review'; reviewLoading = false;
-    bodyParts = []; pages = ['']; shown = 0;
+    bodyParts = []; shown = 0;
     announced = 'The complete story is ready to review.';
     await tick();
     if (!active || phase !== 'review') return;
@@ -330,7 +315,7 @@
     observations.clear(); tasks = {};
     profileParts = []; interactions.pointer = null; interactions.hoverSamples = interactions.hoverTotalMs = 0;
     transcript.clear(); resolvedScenes.clear(); reviewEntries = [];
-    bodyParts = []; sceneSentences = []; pages = ['']; announced = ''; panelTitle = ''; panelParts = [];
+    bodyParts = []; sceneSentences = []; shown = 0; announced = ''; panelTitle = ''; panelParts = [];
     noticeCount = 0; returnFocus = undefined;
     backFocus = undefined; phase = 'finished';
   }
@@ -350,7 +335,6 @@
     if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
     else (panelOpen || phase === 'review' ? area : stage).focus({ preventScroll: true });
     returnFocus = undefined;
-    reflow();
   }
   onMount(() => {
     loadVisit();
@@ -402,15 +386,15 @@
       behavior.advances++;
       if (phase === 'reading') { advanceAfterReading(); return; }
       instantSentence = true;
-      if (phase === 'typing') completePage();
+      if (phase === 'typing') completeSentence();
     }, { signal: session.signal });
     const resize = new ResizeObserver(() => {
       cancelAnimationFrame(layoutFrame);
-      layoutFrame = requestAnimationFrame(reflow);
+      layoutFrame = requestAnimationFrame(followOutput);
     });
     resize.observe(area);
     session.signal.addEventListener('abort', () => resize.disconnect(), { once: true });
-    void document.fonts.ready.then(() => { if (active) reflow(); });
+    void document.fonts.ready.then(() => { if (active) followOutput(); });
     mounted = true;
     void loadNext();
     return () => { mounted = false; resize.disconnect(); stop(); };
@@ -436,8 +420,7 @@
   <main bind:this={stage} tabindex="-1" aria-label="Privacy story">
     {#if noticeCount}{#key noticeCount}<ReturnNotice bind:this={returnNotice} count={noticeCount} {reduced} paused={paused || hidden} oncomplete={finishReturnNotice} />{/key}{/if}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex (This scrollable region needs keyboard focus for Arrow and Page navigation.) -->
-    <div bind:this={area} class="text-area" class:scrollable={skipPlayback || panelOpen || phase === 'review' || phase === 'finished'} class:concealed={noticeCount > 0 || (!!interaction && !panelOpen && !skipPlayback)} inert={noticeCount > 0} tabindex={skipPlayback || panelOpen || phase === 'review' || phase === 'finished' ? 0 : -1} role="region" aria-label={panelOpen ? panelTitle : phase === 'review' ? 'Complete story review' : skipPlayback ? 'Story so far and current interaction' : 'Current sentence'}>
-      <div bind:this={probe} class="text-probe" aria-hidden="true" inert></div>
+    <div bind:this={area} class="text-area scrollable" class:concealed={noticeCount > 0} inert={noticeCount > 0} tabindex="0" onscroll={trackScroll} role="region" aria-label={panelOpen ? panelTitle : phase === 'review' ? 'Complete story review' : 'Story so far and current interaction'}>
       {#if panelOpen}
         <p class="terminal-output"><RenderedText parts={panelParts} /></p>
         {#if plainText(panelParts).includes('Open-Meteo')}<p><a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Weather data by Open-Meteo</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a></p>{/if}
@@ -458,17 +441,13 @@
       {:else if phase === 'finished'}
         <p class="terminal-output"><RenderedText parts={bodyParts} /></p>
       {:else}
-        <p class="terminal-output" aria-hidden="true">{#if phase === 'loading'}{scene?.pending ?? 'Give me a second.'}{:else if phase === 'preparing'}{paused ? 'Paused.' : 'One second.'}{:else}<RenderedText parts={visibleParts} />{/if}{#if active && (phase === 'typing' || phase === 'loading' || phase === 'preparing')}<span class="cursor"></span>{/if}</p>
+        <p class="terminal-output"><RenderedText parts={visibleParts} />{#if phase === 'typing'}<span class="cursor" aria-hidden="true"></span>{/if}</p>
+        {#if phase === 'loading' || phase === 'preparing'}<p class="loading-output" role="status">{phase === 'loading' ? scene?.pending ?? 'Give me a second.' : paused ? 'Paused.' : 'One second.'}<span class="cursor" aria-hidden="true"></span></p>{/if}
         <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{announced}</p>
       {/if}
-      {#if skipPlayback}
-        <div hidden={panelOpen || !interaction || noticeCount > 0} inert={panelOpen || !interaction || noticeCount > 0}>
-          {@render taskContent()}
-        </div>
-      {/if}
-    </div>
-    <div class="interaction scrollable" hidden={skipPlayback || !interaction || panelOpen || noticeCount > 0} inert={!interaction || panelOpen || noticeCount > 0}>
-      {#if !skipPlayback}{@render taskContent()}{/if}
+      <div class="inline-interaction" hidden={panelOpen || !interaction || noticeCount > 0} inert={panelOpen || !interaction || noticeCount > 0}>
+        {@render taskContent()}
+      </div>
     </div>
   </main>
   <footer aria-label="Story controls">
